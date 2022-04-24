@@ -5,12 +5,13 @@ from scipy.sparse.linalg import spsolve
 
 
 GATE_ARR_OFFSET = 5
+PLACEMENT_FILENAME = "place.tiny"
 
 ##################################################################################################
 # Find the total number of gates in this file
 ##################################################################################################
 def get_num_gates():
-    f = open("place.tiny", "r")
+    f = open(PLACEMENT_FILENAME, "r")
     
     # Read placement grid rows/columns
     grid_dims = f.readline().replace('\n','').split(' ')
@@ -35,7 +36,7 @@ def get_num_gates():
 # Read netlist from file
 ##################################################################################################
 def get_netlist():
-    f = open("place.tiny", "r")
+    f = open(PLACEMENT_FILENAME, "r")
     
     # Read placement grid rows/columns
     grid_dims = f.readline().replace('\n','').split(' ')
@@ -52,11 +53,13 @@ def get_netlist():
         # Handle gate
         elif line.split(' ')[1] == 'g':
             line = line.replace('\n','').split(' ')
-            num_connections = line[2]
+            num_connections = int(line[2])
+            gate_id = int(line[0])
 
             # Populate netlist and connections
-            for i in range(0, int(num_connections)):
-                netlist[int(line[i+3])].append(int(line[0]))
+            for i in range(0, num_connections):
+                net_id = int(line[i+3])
+                netlist[net_id].append(gate_id)
 
     f.close()
 
@@ -67,16 +70,20 @@ def get_netlist():
 # Calculate wire weights for both 2-point and multipoint nets
 ##################################################################################################
 def calculate_weights(netlist):
-    # Determine wire weights for multipoint wires -- assume W=1
-    W = 1
+
+    W = 1 # Assume W = 1
     k = [0 for y in range(len(netlist))]
     weights = [0 for y in range(len(netlist))]
+
     for i in range(0, len(k)):
+
         k[i] = len(netlist[i])   # Find k
 
         # This is a multipoint wire
         if k[i] > 1:
             weights[i] = W/(k[i]-1)
+
+        # This is a 2-point wire
         else:
             weights[i] = k[i]
 
@@ -93,34 +100,37 @@ def get_C(netlist, num_gates):
     
     # Determine wire weights for multipoint wires -- assume W=1
     weights = calculate_weights(netlist)
-    print(weights)
 
-    # Fix C matrix with calculated weights
-    f = open("place.tiny", "r")
+    f = open(PLACEMENT_FILENAME, "r")
     
-    # Re-iterate over file, updating weights
     for line in f:
+
         if (line == "-1\n"):
             continue
 
         # Handle gate
         elif line.split(' ')[1] == 'g':
-            line = line.replace('\n','').split(' ')
 
-            gate_id = line[0]
-            num_connections = line[2]
+            line = line.replace('\n','').split(' ')
+            gate_id = int(line[0])
+            num_connections = int(line[2])
 
             # Populate netlist and connections
-            for i in range(3, int(num_connections)+3):
-                net_id = line[i]
-                for gate in netlist[int(net_id)]:
-                    if int(gate_id) != int(gate):
+            for i in range(3, num_connections + 3):
+
+                net_id = int(line[i])
+
+                for gate in netlist[net_id]:
+
+                    gate = int(gate)
+
+                    if gate_id != gate:
+                        
                         # print("so gate {} and gate {} are connected" \
-                        #   .format(int(gate_id), int(gate)))
-                        C[int(gate_id)-GATE_ARR_OFFSET][int(gate)-GATE_ARR_OFFSET] \
-                            += int(weights[int(net_id)])
-                        C[int(gate)-GATE_ARR_OFFSET][int(gate_id)-GATE_ARR_OFFSET] \
-                            += int(weights[int(net_id)])
+                        #   .format(gate_id, int(gate)))
+                        C[gate_id-GATE_ARR_OFFSET][gate-GATE_ARR_OFFSET] += int(weights[net_id])
+                        C[gate-GATE_ARR_OFFSET][gate_id-GATE_ARR_OFFSET] += int(weights[net_id])
+
     f.close()
 
     return C
@@ -135,44 +145,59 @@ def get_A(C):
     A = [[0 for x in range(len(C))] for y in range(len(C[0]))] 
 
     for j in range(0, len(C[0])):
+
         for i in range(0, len(C)):
 
             # Non-diagonal case
             if i != j:
-                A[i][j] = -1 * int(C[i][j])
+                A[i][j] = -1 * C[i][j]
 
             # Diagonal case
             elif i == j:
+
                 for k in range(0, len(C[0])):
-                    A[i][i] += int(C[i][k])
+
+                    A[i][i] += C[i][k]
+
     return A
 ##################################################################################################
 
 
 ##################################################################################################
 # Get b x or y
-#TODO: these are currently calculated incorrectly!!!
 ##################################################################################################
-def get_b(C, char):
+def get_b(C, char, netlist):
 
-    f = open("place.tiny", "r")
+    f = open(PLACEMENT_FILENAME, "r")
 
     b = [0 for x in range(len(C))]
+
+    weights = calculate_weights(netlist)
     
     for line in f:
+
         if (line == "-1\n"):
             continue
-
+    
         # Get b_x or b_y from pin connections
-        if line.split(' ')[1] == 'p':
+        elif line.split(' ')[1] == 'p':
+            
             line = line.replace('\n','').split(' ')
 
-            # (-1) * x position * weight
-            if char == 'x':
-                b[int(line[4])] = (-1) * int(line[2])   # TODO: add multiplication by weight
+            net_id = int(line[4])
+            x_coord = int(line[2])
+            y_coord = int(line[3])
 
-            elif char == 'y':
-                b[int(line[4])] = (-1) * int(line[3])   # TODO: add multiplication by weight
+            for gate in netlist[net_id]:
+
+                print("gate {} is connected to net {}".format(gate, net_id))
+
+                # (-1) * x position * weight
+                if char == 'x':
+                    b[gate-GATE_ARR_OFFSET] = (-1) * x_coord * weights[net_id]
+
+                elif char == 'y':
+                    b[gate-GATE_ARR_OFFSET] = (-1) * y_coord * weights[net_id]
 
     f.close()
 
@@ -183,36 +208,28 @@ def get_b(C, char):
 def main():
 
     # Get netlist
-    netlist = get_netlist()
-    print(netlist)
+    netlist = get_netlist()            
 
+    # Find number of gates
     num_gates = get_num_gates()
 
-    C = get_C(netlist, num_gates)                 # Get C matrix
-    # for line in C:
-    #     print(line)
+    # Get C matrix
+    C = get_C(netlist, num_gates)
 
+    # Get A matrix
+    A = get_A(C) 
 
-    A = get_A(C)                # Get matrix A 
+    # Get b_x
+    b_x = get_b(C, 'x', netlist)
+    print("\nb_x: \n{}\n".format(b_x))
 
-    for line in A:
-        print(line)
-
-    # print()
-
-    b_x = get_b(C, 'x')         # Get b_x
-    # print(b_x)
-
-    # print()
-
-    b_y = get_b(C, 'y')         # Get b_y
-    print(b_y)
+    # Get b_y
+    b_y = get_b(C, 'y', netlist)
+    print("\nb_y: \n{}\n".format(b_y))
 
     # Solve quadratic placement using these matrices
     A = coo_matrix(A)
     
-    # print(A)
-
     # Ax = -b_x
     for i in range(0, len(b_x)):
         b_x[i] *= -1
@@ -223,12 +240,13 @@ def main():
         b_y[i] *= -1
     y = spsolve(A.tocsr(), b_y)
 
-    # TODO: Visualize results of placement. Plot (x[i], y[i])
+    # Visualize results of placement. Plot (x[i], y[i])
     # matplotlib.pyplot.scatter(x, y)
     # matplotlib.pyplot.show()
 
-    print(x)
-    print(y)
+    print("x: \n{}".format(x))
+    print("y: \n{}".format(y))
+    
 
 if __name__ == "__main__":
     main()
