@@ -11,24 +11,26 @@ PLACEMENT_FILENAME = "place.tiny"
 # Find the total number of gates in this file
 ##################################################################################################
 def get_num_gates():
-    f = open(PLACEMENT_FILENAME, "r")
     
-    # Read placement grid rows/columns
-    grid_dims = f.readline().replace('\n','').split(' ')
-
     num_gates = 0
 
-    # First pass: find number of gates and generate netlist
+    # Find number of gates
+    f = open(PLACEMENT_FILENAME, "r")
+
     for line in f:
-        if (line == "-1\n"):
+
+        line = line.replace('\n','').split(' ')
+
+        # Found end-of-file sentinel
+        if (int(line[0]) == -1):
             continue
 
         # Handle gate
-        elif line.split(' ')[1] == 'g':
-            line = line.replace('\n','').split(' ')
+        elif line[1] == 'g':
             num_gates += 1
 
     f.close()
+
     return num_gates
 ##################################################################################################
 
@@ -36,6 +38,7 @@ def get_num_gates():
 # Read netlist from file
 ##################################################################################################
 def get_netlist():
+
     f = open(PLACEMENT_FILENAME, "r")
     
     # Read placement grid rows/columns
@@ -43,21 +46,26 @@ def get_netlist():
 
     # Keep track of net IDs and which gates are connected to each net ID (1-?)
     # First index represents the net ID and stores a list of gates connected to this net ID.
-    netlist = [[] for y in range(int(grid_dims[1])-1)]
+    netlist = [[] for y in range(int(grid_dims[0]))]
 
     # First pass: find number of gates and generate netlist
     for line in f:
-        if (line == "-1\n"):
+
+        line = line.replace('\n','').split(' ')
+
+        # Found end-of-file sentinel
+        if (int(line[0]) == -1):
             continue
 
         # Handle gate
-        elif line.split(' ')[1] == 'g':
-            line = line.replace('\n','').split(' ')
+        elif line[1] == 'g':
+
             num_connections = int(line[2])
             gate_id = int(line[0])
 
             # Populate netlist and connections
             for i in range(0, num_connections):
+
                 net_id = int(line[i+3])
                 netlist[net_id].append(gate_id)
 
@@ -98,20 +106,22 @@ def get_C(netlist, num_gates):
     # Define size of C matrix based on number of gates
     C = [[0 for x in range(int(num_gates))] for y in range(int(num_gates))]
     
-    # Determine wire weights for multipoint wires -- assume W=1
+    # Determine wire weights for netlist
     weights = calculate_weights(netlist)
 
     f = open(PLACEMENT_FILENAME, "r")
     
     for line in f:
 
-        if (line == "-1\n"):
+        line = line.replace('\n','').split(' ')
+
+        # Found end-of-file sentinel
+        if (int(line[0]) == -1):
             continue
 
         # Handle gate
-        elif line.split(' ')[1] == 'g':
+        elif line[1] == 'g':
 
-            line = line.replace('\n','').split(' ')
             gate_id = int(line[0])
             num_connections = int(line[2])
 
@@ -126,8 +136,8 @@ def get_C(netlist, num_gates):
 
                     if gate_id != gate:
                         
-                        # print("so gate {} and gate {} are connected" \
-                        #   .format(gate_id, int(gate)))
+                        # print("gate {} and gate {} are connected via {}" \
+                        # .format(gate_id, gate, net_id))
                         C[gate_id-GATE_ARR_OFFSET][gate-GATE_ARR_OFFSET] += int(weights[net_id])
                         C[gate-GATE_ARR_OFFSET][gate_id-GATE_ARR_OFFSET] += int(weights[net_id])
 
@@ -154,9 +164,7 @@ def get_A(C):
 
             # Diagonal case
             elif i == j:
-
                 for k in range(0, len(C[0])):
-
                     A[i][i] += C[i][k]
 
     return A
@@ -168,22 +176,22 @@ def get_A(C):
 ##################################################################################################
 def get_b(C, char, netlist):
 
-    f = open(PLACEMENT_FILENAME, "r")
-
     b = [0 for x in range(len(C))]
-
     weights = calculate_weights(netlist)
     
+    f = open(PLACEMENT_FILENAME, "r")
+
     for line in f:
 
-        if (line == "-1\n"):
+        line = line.replace('\n','').split(' ')
+
+        # Found end-of-file sentinel
+        if (int(line[0]) == -1):
             continue
     
         # Get b_x or b_y from pin connections
-        elif line.split(' ')[1] == 'p':
+        elif line[1] == 'p':
             
-            line = line.replace('\n','').split(' ')
-
             net_id = int(line[4])
             x_coord = int(line[2])
             y_coord = int(line[3])
@@ -192,7 +200,7 @@ def get_b(C, char, netlist):
 
                 print("gate {} is connected to net {}".format(gate, net_id))
 
-                # (-1) * x position * weight
+                # b[this gate] = (-1) * x position * weight
                 if char == 'x':
                     b[gate-GATE_ARR_OFFSET] = (-1) * x_coord * weights[net_id]
 
