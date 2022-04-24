@@ -37,7 +37,7 @@ def get_num_gates():
 ##################################################################################################
 # Read netlist from file
 ##################################################################################################
-def get_netlist():
+def get_gate_only_netlist():
 
     f = open(PLACEMENT_FILENAME, "r")
     
@@ -73,6 +73,42 @@ def get_netlist():
 
     return netlist
 ##################################################################################################
+# Return an object representing which gates are connected to which pins
+##################################################################################################
+def get_pinlist(netlist):
+    f = open(PLACEMENT_FILENAME, "r")
+
+    # Specifies which pin is connected to which gates
+    pinlist = {}
+
+    # First pass: find number of gates and generate netlist
+    for line in f:
+
+        line = line.replace('\n','').split(' ')
+
+        # Found end-of-file sentinel
+        if (int(line[0]) == -1):
+            continue
+
+        # Handle nets connected to pins
+        elif line[1] == 'p':
+            
+            pin_id = int(line[0])
+            net_id = int(line[4])
+            x_coord = int(line[2])
+            y_coord = int(line[3])
+
+            # check which gates are connected to net_id
+            pinlist[pin_id] = []
+
+            for gate_id in netlist[net_id]:
+                # print("gate {} is connected to pin {}".format(gate_id, pin_id))
+                pinlist[pin_id].append(gate_id)
+
+    f.close()
+
+    return pinlist
+
 
 ##################################################################################################
 # Calculate wire weights for both 2-point and multipoint nets
@@ -145,11 +181,24 @@ def get_C(netlist, num_gates):
 
     return C
 ##################################################################################################
+# Return true if gate_d is connected to a pin in pinlist. 
+# TODO: This function currently assumes that one pin is connected to at most one gate and that the
+# net has a weight of 1. This is true for place.tiny but might not be true for other file.
+##################################################################################################
+def gate_is_connected_to_a_pin(gate_id, pinlist):
+
+    # print(pinlist.values())
+    for list_of_pins in pinlist.values():
+        if gate_id in list_of_pins:
+            return True
+
+    return False
+##################################################################################################
 
 ##################################################################################################
 # Compute A matrix
 ################################################################################################## 
-def get_A(C):
+def get_A(C, pinlist):
 
     # Initialize A matrix from C dimensions
     A = [[0 for x in range(len(C))] for y in range(len(C[0]))] 
@@ -163,9 +212,17 @@ def get_A(C):
                 A[i][j] = -1 * C[i][j]
 
             # Diagonal case
+            # i and j represent an index in A or C. this index + GATE_ARR_OFFSET is the gate_id. 
             elif i == j:
                 for k in range(0, len(C[0])):
                     A[i][i] += C[i][k]
+
+                # If gate i == j is connected to a pin, increment A[i][i] by the weight
+                # of the wire connecting this pin
+                if gate_is_connected_to_a_pin(i + GATE_ARR_OFFSET, pinlist):
+                    # print("gate {} is connected to a pin! incrementing".format(i))
+                    A[i][i] += 1        # TODO: Change this to the weight
+                
 
     return A
 ##################################################################################################
@@ -198,14 +255,14 @@ def get_b(C, char, netlist):
 
             for gate in netlist[net_id]:
 
-                print("gate {} is connected to net {}".format(gate, net_id))
+                # print("gate {} is connected to net {}".format(gate, net_id))
 
-                # b[this gate] = (-1) * x position * weight
+                # b[this gate] =  x position * weight
                 if char == 'x':
-                    b[gate-GATE_ARR_OFFSET] = (-1) * x_coord * weights[net_id]
+                    b[gate-GATE_ARR_OFFSET] = x_coord * weights[net_id]
 
                 elif char == 'y':
-                    b[gate-GATE_ARR_OFFSET] = (-1) * y_coord * weights[net_id]
+                    b[gate-GATE_ARR_OFFSET] = y_coord * weights[net_id]
 
     f.close()
 
@@ -216,7 +273,9 @@ def get_b(C, char, netlist):
 def main():
 
     # Get netlist
-    netlist = get_netlist()            
+    netlist = get_gate_only_netlist()    
+
+    # print("\nnetlist={}\n".format(netlist))        
 
     # Find number of gates
     num_gates = get_num_gates()
@@ -225,32 +284,39 @@ def main():
     C = get_C(netlist, num_gates)
 
     # Get A matrix
-    A = get_A(C) 
+    pinlist = get_pinlist(netlist)
+    # print("\npinlist = {}\n".format(pinlist))
+    A = get_A(C, pinlist) 
+    # for line in A:
+    #     print(line)
+    
+    # if numpy.all(numpy.linalg.eigvals(A) > 0):
+    #     print("A is positive definite")
 
     # Get b_x
     b_x = get_b(C, 'x', netlist)
-    print("\nb_x: \n{}\n".format(b_x))
+    # print("\nb_x: \n{}\n".format(b_x))
 
     # Get b_y
     b_y = get_b(C, 'y', netlist)
-    print("\nb_y: \n{}\n".format(b_y))
+    # print("\nb_y: \n{}\n".format(b_y))
 
     # Solve quadratic placement using these matrices
     A = coo_matrix(A)
     
     # Ax = -b_x
-    for i in range(0, len(b_x)):
-        b_x[i] *= -1
     x = spsolve(A.tocsr(), b_x)
 
     # Ay = -b_y
-    for i in range(0, len(b_y)):
-        b_y[i] *= -1
     y = spsolve(A.tocsr(), b_y)
 
     # Visualize results of placement. Plot (x[i], y[i])
-    # matplotlib.pyplot.scatter(x, y)
-    # matplotlib.pyplot.show()
+    matplotlib.pyplot.scatter(x, y)
+    matplotlib.pyplot.xlim([0, 61])
+    matplotlib.pyplot.ylim([0, 61])
+    
+    matplotlib.pyplot.show()
+
 
     print("x: \n{}".format(x))
     print("y: \n{}".format(y))
